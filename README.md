@@ -159,7 +159,7 @@ Please see the [CONTRIBUTING.md](CONTRIBUTING.md) file for more details.
 
 ## License
 
-Distributed under the MIT License. See `LICENSE` for more information.
+Distributed under the GNU Affero General Public License v3.0 License. See `LICENSE` for more information.
 
 ## Contact
 
