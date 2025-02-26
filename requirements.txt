@@ -1,0 +1,15 @@
+requests
+googlesearch-python
+crawl4ai
+nest-asyncio
+minio
+python-dotenv
+langchain
+beautifulsoup4
+xmltodict
+asyncio
+rich
+python-telegram-bot
+python-json-logger
+langchain-community
+rich
