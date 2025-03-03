@@ -19,8 +19,7 @@ from src.google_search.sitemap import find_sitemap
 
 from googlesearch import search
 
-logging.basicConfig(level=logging.INFO, 
-                    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 CURRENT_PROXY = None
@@ -65,6 +64,23 @@ def show_ip_info():
     else:
         logger.info("[IP CHECK] No proxy in use.")
 
+def retry_find_sitemap(domain, retries=3, delay=5):
+    for attempt in range(1, retries + 1):
+        try:
+            sitemap = find_sitemap(domain)
+            if sitemap:
+                return sitemap
+            else:
+                logger.info(f"[SEARCH] No sitemap found for {domain} on attempt {attempt}.")
+        except Exception as e:
+            error_message = str(e).lower()
+            if any(trigger in error_message for trigger in ["not a gzipped file", "404", "301", "429", "geo", "blocked", "cloudflare"]):
+                logger.warning(f"[SEARCH] Error for domain {domain} on attempt {attempt}: {e}")
+            else:
+                logger.error(f"[SEARCH] Unexpected error for domain {domain} on attempt {attempt}: {e}")
+        time.sleep(delay)
+    return None
+
 def search_google(keywords_file, jobname, num_results=500):
     global CURRENT_PROXY
     show_ip_info()
@@ -91,45 +107,50 @@ def search_google(keywords_file, jobname, num_results=500):
         else:
             current_proxy_str = None
 
-        try:
-            if PROXY_ENABLED and current_proxy_str:
-                results = list(search(
-                    keyword,
-                    num_results=num_results,
-                    lang="en",
-                    region="us",
-                    safe=None,
-                    unique=True,
-                    proxy=current_proxy_str,
-                    ssl_verify=False
-                ))
-            else:
-                results = list(search(
-                    keyword,
-                    num_results=num_results,
-                    lang="en",
-                    region="us",
-                    safe=None,
-                    unique=True
-                ))
-        except Exception as e:
-            error_message = str(e).lower()
-            if any(trigger in error_message for trigger in ["429", "blocked", "rate limit", "temporarily unavailable"]):
-                logger.warning(f"[SEARCH] Error '{error_message}' encountered for '{keyword}'. "
-                               f"Invalidating proxy and retrying in {backoff} sec... (Retries left: {retries-1})")
-                if PROXY_ENABLED:
-                    invalidate_current_proxy(current_proxy_str)
-                    current_proxy_str = get_proxy_str()
-                time.sleep(backoff + random.uniform(1, 3))
-                retries -= 1
-                backoff *= BACKOFF_MULTIPLIER
-                continue
-            else:
-                logger.error(f"[SEARCH] Error for '{keyword}': {e}")
-                add_failed_url(keyword, str(e))
-                continue
+        results = None
+        while retries > 0:
+            try:
+                try:
+                    all_results = list(search(
+                        keyword,
+                        num_results=num_results,
+                        lang="en",
+                        region="us",
+                        safe=None,
+                        unique=True,
+                        proxy=current_proxy_str,
+                        ssl_verify=False
+                    ))
+                except TypeError:
+                    all_results = list(search(
+                        keyword,
+                        num=num_results,
+                        lang="en",
+                        region="us",
+                        safe=None,
+                        unique=True,
+                        proxy=current_proxy_str,
+                        ssl_verify=False
+                    ))
+                results = all_results
+                break 
+            except Exception as e:
+                error_message = str(e).lower()
+                if any(trigger in error_message for trigger in ["429", "blocked", "rate limit", "temporarily unavailable"]):
+                    logger.warning(f"[SEARCH] Error '{error_message}' encountered for '{keyword}'. "
+                                   f"Invalidating proxy and retrying in {backoff} sec... (Retries left: {retries-1})")
+                    if PROXY_ENABLED:
+                        invalidate_current_proxy(current_proxy_str)
+                        current_proxy_str = get_proxy_str()
+                    time.sleep(backoff + random.uniform(1, 3))
+                    retries -= 1
+                    backoff *= BACKOFF_MULTIPLIER
+                else:
+                    logger.error(f"[SEARCH] Error for '{keyword}': {e}")
+                    add_failed_url(keyword, str(e))
+                    break
 
-        if not results:
+        if results is None:
             logger.warning(f"[SEARCH] No results for '{keyword}'")
             continue
 
@@ -139,7 +160,7 @@ def search_google(keywords_file, jobname, num_results=500):
             if domain and domain not in unique_domains:
                 unique_domains.add(domain)
                 add_domain_found(keyword, domain)
-                sitemap = find_sitemap(domain)
+                sitemap = retry_find_sitemap(domain, retries=3, delay=5)
                 if sitemap:
                     sitemap_urls.add(sitemap)
                     logger.info(f"[SEARCH] Found valid sitemap: {sitemap}")
